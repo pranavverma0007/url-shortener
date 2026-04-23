@@ -76,26 +76,38 @@ jobs:
       - name: Get API URL from CloudFormation outputs
         id: get_api_url
         run: |
-          echo "Querying region: ${{ secrets.AWS_REGION }}"
-          echo "Stack name: url-shortener"
+          set -euo pipefail
 
-          echo "--- Raw CloudFormation Outputs ---"
+          REGION="${AWS_REGION:-${{ secrets.AWS_REGION }}}"
+          STACK_NAME="url-shortener"
+
+          echo "Querying stack '$STACK_NAME' in region '$REGION'"
+
+          echo "--- All CloudFormation Outputs ---"
           aws cloudformation describe-stacks \
-            --stack-name url-shortener \
-            --region ${{ secrets.AWS_REGION }} \
+            --stack-name "$STACK_NAME" \
+            --region "$REGION" \
             --query "Stacks[0].Outputs" \
-            --output json
+            --output json || true
+
+          echo "--- All Output Keys ---"
+          aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$REGION" \
+            --query "Stacks[0].Outputs[].OutputKey" \
+            --output json || true
 
           API_URL=$(aws cloudformation describe-stacks \
-            --stack-name url-shortener \
-            --region ${{ secrets.AWS_REGION }} \
-            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
+            --stack-name "$STACK_NAME" \
+            --region "$REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue | [0]" \
             --output text)
 
           echo "Extracted API_URL: '$API_URL'"
 
-          if [ -z "$API_URL" ]; then
-            echo "ERROR: API_URL is empty — CloudFormation output not found"
+          if [ -z "$API_URL" ] || [ "$API_URL" = "None" ]; then
+            echo "ERROR: ApiUrl output not found in stack '$STACK_NAME'"
+            echo "Check that template.yaml Outputs section has 'ApiUrl' defined"
             exit 1
           fi
 
@@ -108,10 +120,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Debug — print API URL
+        env:
+          API_URL: ${{ needs.deploy.outputs.api_url }}
         run: |
-          echo "API URL received: ${{ needs.deploy.outputs.api_url }}"
-          if [ -z "${{ needs.deploy.outputs.api_url }}" ]; then
-            echo "ERROR: api_url is empty"
+          echo "API URL received: '$API_URL'"
+          if [ -z "$API_URL" ]; then
+            echo "ERROR: api_url output is empty — deploy job may not have set it"
             exit 1
           fi
 
