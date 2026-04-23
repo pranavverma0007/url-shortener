@@ -39,13 +39,11 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v
 
-  deploy:
-    name: Deploy to AWS
+  deploy-and-smoke-test:
+    name: Deploy & Smoke Test
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
-    outputs:
-      api_url: ${{ steps.get_api_url.outputs.api_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -76,8 +74,6 @@ jobs:
       - name: Get API URL from CloudFormation outputs
         id: get_api_url
         run: |
-          set -euo pipefail
-
           REGION="${AWS_REGION:-${{ secrets.AWS_REGION }}}"
           STACK_NAME="url-shortener"
 
@@ -88,14 +84,7 @@ jobs:
             --stack-name "$STACK_NAME" \
             --region "$REGION" \
             --query "Stacks[0].Outputs" \
-            --output json || true
-
-          echo "--- All Output Keys ---"
-          aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --region "$REGION" \
-            --query "Stacks[0].Outputs[].OutputKey" \
-            --output json || true
+            --output json
 
           API_URL=$(aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
@@ -107,40 +96,28 @@ jobs:
 
           if [ -z "$API_URL" ] || [ "$API_URL" = "None" ]; then
             echo "ERROR: ApiUrl output not found in stack '$STACK_NAME'"
-            echo "Check that template.yaml Outputs section has 'ApiUrl' defined"
             exit 1
           fi
 
-          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+          echo "api_url=$API_URL" >> "$GITHUB_OUTPUT"
 
-  smoke-test:
-    name: Smoke Test
-    needs: deploy
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Debug — print API URL
-        env:
-          API_URL: ${{ needs.deploy.outputs.api_url }}
-        run: |
-          echo "API URL received: '$API_URL'"
-          if [ -z "$API_URL" ]; then
-            echo "ERROR: api_url output is empty — deploy job may not have set it"
-            exit 1
-          fi
+      # ── Smoke Tests (run in same job — no cross-job output issues) ──
 
       - name: Wait for API to be ready
         run: sleep 5
 
-      - name: Test POST /shorten
+      - name: Smoke Test — POST /shorten
         id: shorten
         run: |
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST ${{ needs.deploy.outputs.api_url }}/shorten \
+          API_URL="${{ steps.get_api_url.outputs.api_url }}"
+          echo "Testing POST $API_URL/shorten"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_URL/shorten" \
             -H "Content-Type: application/json" \
             -d '{"url": "https://github.com/pranavverma0007"}')
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | head -n1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
 
           echo "Response body: $BODY"
           echo "HTTP status: $HTTP_CODE"
@@ -150,15 +127,17 @@ jobs:
             exit 1
           fi
 
-          SHORT_CODE=$(echo $BODY | python3 -c "import sys, json; print(json.load(sys.stdin)['short_code'])")
-          echo "short_code=$SHORT_CODE" >> $GITHUB_OUTPUT
+          SHORT_CODE=$(echo "$BODY" | python3 -c "import sys, json; print(json.load(sys.stdin)['short_code'])")
+          echo "short_code=$SHORT_CODE" >> "$GITHUB_OUTPUT"
           echo "Extracted short_code: $SHORT_CODE"
 
-      - name: Test GET /{code} redirect
+      - name: Smoke Test — GET /{code} redirect
         run: |
-          SHORT_CODE=${{ steps.shorten.outputs.short_code }}
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            ${{ needs.deploy.outputs.api_url }}/$SHORT_CODE)
+          API_URL="${{ steps.get_api_url.outputs.api_url }}"
+          SHORT_CODE="${{ steps.shorten.outputs.short_code }}"
+          echo "Testing GET $API_URL/$SHORT_CODE"
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/$SHORT_CODE")
 
           echo "Redirect HTTP status: $HTTP_CODE"
 
@@ -167,10 +146,12 @@ jobs:
             exit 1
           fi
 
-      - name: Test GET /nonexistent returns 404
+      - name: Smoke Test — GET /nonexistent returns 404
         run: |
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            ${{ needs.deploy.outputs.api_url }}/doesnotexist999)
+          API_URL="${{ steps.get_api_url.outputs.api_url }}"
+          echo "Testing GET $API_URL/doesnotexist999"
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/doesnotexist999")
 
           echo "404 test HTTP status: $HTTP_CODE"
 
@@ -180,4 +161,4 @@ jobs:
           fi
 
       - name: All smoke tests passed
-        run: echo "Deployment verified — POST, redirect, and 404 all working."
+        run: echo "✅ Deployment verified — POST, redirect, and 404 all working."
