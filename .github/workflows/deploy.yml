@@ -6,12 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-# Required GitHub Secrets:
-#   AWS_ACCESS_KEY_ID
-#   AWS_SECRET_ACCESS_KEY
-#   AWS_REGION (e.g., us-east-1)
-#   S3_BUCKET (SAM deployment bucket)
-
 jobs:
   test:
     name: Run Tests
@@ -24,19 +18,34 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-dev.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check src/ tests/
 
       - name: Run tests
         run: pytest tests/ -v
 
   deploy:
     name: Deploy to AWS
-    needs: test                    # Only deploy if tests pass
+    needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    outputs:
+      api_url: ${{ steps.get_api_url.outputs.api_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -67,3 +76,73 @@ jobs:
             --s3-bucket ${{ secrets.S3_BUCKET }} \
             --capabilities CAPABILITY_IAM \
             --region ${{ secrets.AWS_REGION }}
+
+      - name: Get API URL from CloudFormation outputs
+        id: get_api_url
+        run: |
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name url-shortener \
+            --region ${{ secrets.AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
+            --output text)
+          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+          echo "API URL: $API_URL"
+
+  smoke-test:
+    name: Smoke Test
+    needs: deploy
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for API to be ready
+        run: sleep 5
+
+      - name: Test POST /shorten
+        id: shorten
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST ${{ needs.deploy.outputs.api_url }}/shorten \
+            -H "Content-Type: application/json" \
+            -d '{"url": "https://github.com/pranavverma0007"}')
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n1)
+
+          echo "Response body: $BODY"
+          echo "HTTP status: $HTTP_CODE"
+
+          if [ "$HTTP_CODE" != "201" ]; then
+            echo "FAILED: Expected 201, got $HTTP_CODE"
+            exit 1
+          fi
+
+          SHORT_CODE=$(echo $BODY | python3 -c "import sys, json; print(json.load(sys.stdin)['short_code'])")
+          echo "short_code=$SHORT_CODE" >> $GITHUB_OUTPUT
+          echo "short_code: $SHORT_CODE"
+
+      - name: Test GET /{code} redirect
+        run: |
+          SHORT_CODE=${{ steps.shorten.outputs.short_code }}
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            ${{ needs.deploy.outputs.api_url }}/$SHORT_CODE)
+
+          echo "Redirect HTTP status: $HTTP_CODE"
+
+          if [ "$HTTP_CODE" != "302" ]; then
+            echo "FAILED: Expected 302, got $HTTP_CODE"
+            exit 1
+          fi
+
+      - name: Test GET /nonexistent returns 404
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            ${{ needs.deploy.outputs.api_url }}/doesnotexist999)
+
+          echo "404 test HTTP status: $HTTP_CODE"
+
+          if [ "$HTTP_CODE" != "404" ]; then
+            echo "FAILED: Expected 404, got $HTTP_CODE"
+            exit 1
+          fi
+
+      - name: All smoke tests passed
+        run: echo "Deployment verified — POST, redirect, and 404 all working."
