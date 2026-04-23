@@ -108,7 +108,7 @@ Add these secrets to your GitHub repo:
 |---|---|
 | `AWS_ACCESS_KEY_ID` | Your IAM access key |
 | `AWS_SECRET_ACCESS_KEY` | Your IAM secret key |
-| `AWS_REGION` | e.g., `us-east-1` |
+| `AWS_REGION` | e.g., `ap-south-1` |
 | `S3_BUCKET` | SAM deployment artifacts bucket |
 
 Push to `main` → tests run → deploy to AWS automatically.
