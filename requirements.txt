@@ -1,0 +1,2 @@
+# Runtime dependencies (deployed with Lambda)
+boto3>=1.35.0

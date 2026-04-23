@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Serverless URL Shortener — Lambda + API Gateway + DynamoDB
+
+# ──────────────────────────────────────────────
+# Global settings shared by all Lambda functions
+# ──────────────────────────────────────────────
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 10
+    MemorySize: 128
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref UrlTable
+
+# ──────────────────────────────────────────────
+# Resources
+# ──────────────────────────────────────────────
+Resources:
+
+  # --- HTTP API (API Gateway v2) ---
+  UrlShortenerApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - POST
+          - GET
+        AllowHeaders:
+          - Content-Type
+
+  # --- Shorten Function ---
+  ShortenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.shorten.handler
+      CodeUri: .
+      Description: Creates a short URL mapping
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UrlTable
+      Events:
+        ShortenApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref UrlShortenerApi
+            Path: /shorten
+            Method: POST
+
+  # --- Redirect Function ---
+  RedirectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.redirect.handler
+      CodeUri: .
+      Description: Redirects short code to original URL
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UrlTable
+      Events:
+        RedirectApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref UrlShortenerApi
+            Path: /{code}
+            Method: GET
+
+  # --- DynamoDB Table ---
+  UrlTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: url-shortener-table
+      BillingMode: PAY_PER_REQUEST          # Free-tier friendly, no capacity planning
+      AttributeDefinitions:
+        - AttributeName: short_code
+          AttributeType: S
+      KeySchema:
+        - AttributeName: short_code
+          KeyType: HASH                      # Partition key only — simple key-value lookup
+
+# ──────────────────────────────────────────────
+# Outputs
+# ──────────────────────────────────────────────
+Outputs:
+  ApiUrl:
+    Description: URL of the API Gateway endpoint
+    Value: !Sub "https://${UrlShortenerApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+  ShortenFunctionArn:
+    Description: ARN of the Shorten Lambda function
+    Value: !GetAtt ShortenFunction.Arn
+  RedirectFunctionArn:
+    Description: ARN of the Redirect Lambda function
+    Value: !GetAtt RedirectFunction.Arn
+  UrlTableName:
+    Description: Name of the DynamoDB table
+    Value: !Ref UrlTable

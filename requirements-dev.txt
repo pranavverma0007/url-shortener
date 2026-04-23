@@ -1,0 +1,4 @@
+# Dev/test dependencies (NOT deployed with Lambda)
+-r requirements.txt
+pytest>=8.0.0
+moto[dynamodb]>=5.0.0
