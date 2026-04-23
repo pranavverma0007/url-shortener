@@ -72,10 +72,6 @@ jobs:
           sam deploy \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --stack-name url-shortener \
-            --s3-bucket ${{ secrets.S3_BUCKET }} \
-            --capabilities CAPABILITY_IAM \
-            --region ${{ secrets.AWS_REGION }}
 
       - name: Get API URL from CloudFormation outputs
         id: get_api_url
