@@ -1,12 +1,8 @@
 version = 0.1
-
 [default.deploy.parameters]
 stack_name = "url-shortener"
-resolve_s3 = true
+s3_bucket = "sam-artifacts-url-shortener-pranav"
 s3_prefix = "url-shortener"
 region = "ap-south-1"
+confirm_changeset = false
 capabilities = "CAPABILITY_IAM"
-image_repositories = []
-
-[default.global.parameters]
-region = "ap-south-1"
