@@ -71,18 +71,35 @@ jobs:
         run: |
           sam deploy \
             --no-confirm-changeset \
-            --no-fail-on-empty-changeset \
+            --no-fail-on-empty-changeset
 
       - name: Get API URL from CloudFormation outputs
         id: get_api_url
         run: |
+          echo "Querying region: ${{ secrets.AWS_REGION }}"
+          echo "Stack name: url-shortener"
+
+          echo "--- Raw CloudFormation Outputs ---"
+          aws cloudformation describe-stacks \
+            --stack-name url-shortener \
+            --region ${{ secrets.AWS_REGION }} \
+            --query "Stacks[0].Outputs" \
+            --output json
+
           API_URL=$(aws cloudformation describe-stacks \
             --stack-name url-shortener \
             --region ${{ secrets.AWS_REGION }} \
             --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
             --output text)
+
+          echo "Extracted API_URL: '$API_URL'"
+
+          if [ -z "$API_URL" ]; then
+            echo "ERROR: API_URL is empty — CloudFormation output not found"
+            exit 1
+          fi
+
           echo "api_url=$API_URL" >> $GITHUB_OUTPUT
-          echo "API URL: $API_URL"
 
   smoke-test:
     name: Smoke Test
@@ -97,7 +114,7 @@ jobs:
             echo "ERROR: api_url is empty"
             exit 1
           fi
-          
+
       - name: Wait for API to be ready
         run: sleep 5
 
@@ -121,7 +138,7 @@ jobs:
 
           SHORT_CODE=$(echo $BODY | python3 -c "import sys, json; print(json.load(sys.stdin)['short_code'])")
           echo "short_code=$SHORT_CODE" >> $GITHUB_OUTPUT
-          echo "short_code: $SHORT_CODE"
+          echo "Extracted short_code: $SHORT_CODE"
 
       - name: Test GET /{code} redirect
         run: |
