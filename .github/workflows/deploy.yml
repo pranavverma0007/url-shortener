@@ -90,6 +90,14 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
+      - name: Debug — print API URL
+        run: |
+          echo "API URL received: ${{ needs.deploy.outputs.api_url }}"
+          if [ -z "${{ needs.deploy.outputs.api_url }}" ]; then
+            echo "ERROR: api_url is empty"
+            exit 1
+          fi
+          
       - name: Wait for API to be ready
         run: sleep 5
 
