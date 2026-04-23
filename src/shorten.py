@@ -72,7 +72,7 @@ def handler(event, context):
                 "body": json.dumps(
                     {
                         "short_code": code,
-                        "short_url": f"https://{event.get('requestContext', {}).get('domainName', 'localhost')}/{code}",
+                        "short_url": f"https://{event.get('requestContext', {}).get('domainName', 'localhost')}/prod/{code}",
                         "original_url": long_url,
                     }
                 ),

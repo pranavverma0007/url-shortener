@@ -70,7 +70,7 @@ class TestShortenHandler:
         assert "short_code" in body
         assert len(body["short_code"]) == 6
         assert body["original_url"] == "https://example.com/long/path"
-        assert body["short_code"] in body["short_url"]
+        assert f"/prod/{body['short_code']}" in body["short_url"]
 
     def test_shorten_missing_url(self, api_event):
         """Should return 400 when 'url' field is missing."""

@@ -73,6 +73,7 @@ Resources:
   # --- DynamoDB Table ---
   UrlTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
     Properties:
       TableName: url-shortener-table
       BillingMode: PAY_PER_REQUEST          # Free-tier friendly, no capacity planning
